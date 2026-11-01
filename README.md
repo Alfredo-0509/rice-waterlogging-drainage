@@ -1,4 +1,4 @@
-# Rice Waterlogging Drainage — Laptop Demo
+# Rice Waterlogging Drainage
 
 Prototype for **food + water resilience**: reduce rice crop loss from extreme rainfall / typhoon waterlogging on polder farmland in eastern China (Jianghuai / middle-lower Yangtze).
 
