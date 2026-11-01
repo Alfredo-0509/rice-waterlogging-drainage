@@ -1,0 +1,1 @@
+timestamp_local,timestamp_utc,farm_id,plot_id,device_id,sensor_id,sensor_type,raw_adc,value_si,unit,cal_version,quality_flag

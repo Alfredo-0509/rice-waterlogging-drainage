@@ -1,0 +1,3 @@
+farm_id,plot_id,device_id,sensor_id,sensor_type,depth_cm,crop,soil_class
+JH-AH-01,P-RICE-A,RPi-01,S-RAIN-01,rain_cap,0,rice,clay_loam
+JH-AH-01,P-RICE-A,RPi-01,S-VWC-01,soil_vwc_cap,15,rice,clay_loam

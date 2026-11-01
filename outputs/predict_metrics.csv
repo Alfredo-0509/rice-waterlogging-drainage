@@ -1,0 +1,2 @@
+accuracy,mae,dummy_accuracy,early_holdout_accuracy,early_holdout_dummy_accuracy,n_train,n_test,classes_train,test_label_counts,note
+1.0,0.082,0.0,1.0,0.0,206,112,"['none', 'severe', 'watch', 'waterlogging']",{'severe': 112},late test window is often all-severe under do-nothing ponding; see early_holdout_* and MAE

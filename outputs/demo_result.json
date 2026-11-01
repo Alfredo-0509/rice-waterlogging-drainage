@@ -1,0 +1,60 @@
+{
+  "metrics": {
+    "accuracy": 1.0,
+    "mae": 0.082,
+    "dummy_accuracy": 0.0,
+    "early_holdout_accuracy": 1.0,
+    "early_holdout_dummy_accuracy": 0.0,
+    "n_train": 206,
+    "n_test": 112,
+    "classes_train": [
+      "none",
+      "severe",
+      "watch",
+      "waterlogging"
+    ],
+    "test_label_counts": {
+      "severe": 112
+    },
+    "note": "late test window is often all-severe under do-nothing ponding; see early_holdout_* and MAE"
+  },
+  "summary": [
+    {
+      "policy": "do_nothing",
+      "hours_ponded": 50.0,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 230.1,
+      "damage_proxy": 0.915,
+      "max_severity_score": 1.0,
+      "hours_pump_on": 0.0,
+      "total_pumped_mm": 0.0
+    },
+    {
+      "policy": "rule_based",
+      "hours_ponded": 12.67,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 115.9,
+      "damage_proxy": 0.621,
+      "max_severity_score": 0.97,
+      "hours_pump_on": 12.33,
+      "total_pumped_mm": 308.3
+    },
+    {
+      "policy": "automated",
+      "hours_ponded": 6.33,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 84.3,
+      "damage_proxy": 0.474,
+      "max_severity_score": 0.85,
+      "hours_pump_on": 51.83,
+      "total_pumped_mm": 317.7
+    }
+  ],
+  "figures": [
+    "/Users/alfredcheung/Desktop/sus challenge/ai model/rice-waterlogging-drainage/outputs/fig_rain_vwc.png",
+    "/Users/alfredcheung/Desktop/sus challenge/ai model/rice-waterlogging-drainage/outputs/fig_ponding_pump.png",
+    "/Users/alfredcheung/Desktop/sus challenge/ai model/rice-waterlogging-drainage/outputs/fig_severity.png",
+    "/Users/alfredcheung/Desktop/sus challenge/ai model/rice-waterlogging-drainage/outputs/fig_damage_compare.png",
+    "/Users/alfredcheung/Desktop/sus challenge/ai model/rice-waterlogging-drainage/outputs/fig_field_damage.png"
+  ]
+}
