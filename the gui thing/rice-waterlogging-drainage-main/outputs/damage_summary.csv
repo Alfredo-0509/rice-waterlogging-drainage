@@ -1,0 +1,10 @@
+model,model_label,policy,policy_label,hours_ponded,hours_above_fc,peak_pond_mm,damage_proxy,max_severity_score,hours_pump_on,total_pumped_mm
+bucket,Single bucket (baseline),do_nothing,Do nothing,50.0,52.67,230.1,0.915,1.0,0.0,0.0
+bucket,Single bucket (baseline),rule_based,Rule based,12.67,52.67,116.9,0.621,0.97,12.33,308.3
+bucket,Single bucket (baseline),automated,Automated (ML),6.33,52.67,84.7,0.475,0.85,51.83,318.6
+two_layer,Two-layer soil profile,do_nothing,Do nothing,37.67,52.67,187.8,0.862,0.97,0.0,0.0
+two_layer,Two-layer soil profile,rule_based,Rule based,7.17,52.67,98.3,0.512,0.97,7.17,179.2
+two_layer,Two-layer soil profile,automated,Automated (ML),5.67,52.67,76.2,0.451,0.82,51.83,187.8
+plough_pan,Compacted plough pan (worst case),do_nothing,Do nothing,50.17,52.67,263.5,0.915,1.0,0.0,0.0
+plough_pan,Compacted plough pan (worst case),rule_based,Rule based,16.17,52.67,143.1,0.677,1.0,15.83,395.8
+plough_pan,Compacted plough pan (worst case),automated,Automated (ML),10.33,52.67,105.1,0.576,0.97,51.83,413.7

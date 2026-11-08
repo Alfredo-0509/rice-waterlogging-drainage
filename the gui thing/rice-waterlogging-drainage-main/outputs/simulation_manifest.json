@@ -1,0 +1,14 @@
+{
+  "models": [
+    "two_layer"
+  ],
+  "policies": [
+    "do_nothing"
+  ],
+  "csv_files": [
+    "outputs\\sim_do_nothing__two_layer.csv",
+    "outputs\\pump_workflow_do_nothing__two_layer.csv"
+  ],
+  "updated": "2026-11-08T18:58:49+08:00",
+  "note": "CSVs produced by the most recent simulation run. The GUI CSV inspector lists only these by default; uncheck 'Only simulated runs' or use the Files tab to see every artefact on disk."
+}

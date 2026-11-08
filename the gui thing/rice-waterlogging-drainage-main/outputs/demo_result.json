@@ -1,0 +1,161 @@
+{
+  "config": {
+    "seed": null,
+    "rain_noise": 0.05,
+    "rain_noise_dry": 0.01,
+    "rain_sensor_noise": 0.02,
+    "vwc_sensor_noise": 0.002,
+    "models": [
+      "two_layer"
+    ],
+    "policies": [
+      "do_nothing"
+    ]
+  },
+  "metrics": {
+    "accuracy": 1.0,
+    "mae": 0.133,
+    "dummy_accuracy": 0.0,
+    "early_holdout_accuracy": 1.0,
+    "early_holdout_dummy_accuracy": 0.0,
+    "n_train": 206,
+    "n_test": 112,
+    "classes_train": [
+      "none",
+      "severe",
+      "watch",
+      "waterlogging"
+    ],
+    "test_label_counts": {
+      "severe": 112
+    },
+    "note": "late test window is often all-severe under do-nothing ponding; see early_holdout_* and MAE"
+  },
+  "summary": [
+    {
+      "model": "bucket",
+      "model_label": "Single bucket (baseline)",
+      "policy": "do_nothing",
+      "policy_label": "Do nothing",
+      "hours_ponded": 50.0,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 230.1,
+      "damage_proxy": 0.915,
+      "max_severity_score": 1.0,
+      "hours_pump_on": 0.0,
+      "total_pumped_mm": 0.0
+    },
+    {
+      "model": "bucket",
+      "model_label": "Single bucket (baseline)",
+      "policy": "rule_based",
+      "policy_label": "Rule based",
+      "hours_ponded": 12.67,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 116.9,
+      "damage_proxy": 0.621,
+      "max_severity_score": 0.97,
+      "hours_pump_on": 12.33,
+      "total_pumped_mm": 308.3
+    },
+    {
+      "model": "bucket",
+      "model_label": "Single bucket (baseline)",
+      "policy": "automated",
+      "policy_label": "Automated (ML)",
+      "hours_ponded": 6.33,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 84.7,
+      "damage_proxy": 0.475,
+      "max_severity_score": 0.85,
+      "hours_pump_on": 51.83,
+      "total_pumped_mm": 318.6
+    },
+    {
+      "model": "two_layer",
+      "model_label": "Two-layer soil profile",
+      "policy": "do_nothing",
+      "policy_label": "Do nothing",
+      "hours_ponded": 37.67,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 186.7,
+      "damage_proxy": 0.862,
+      "max_severity_score": 0.97,
+      "hours_pump_on": 0.0,
+      "total_pumped_mm": 0.0
+    },
+    {
+      "model": "two_layer",
+      "model_label": "Two-layer soil profile",
+      "policy": "rule_based",
+      "policy_label": "Rule based",
+      "hours_ponded": 7.17,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 98.3,
+      "damage_proxy": 0.512,
+      "max_severity_score": 0.97,
+      "hours_pump_on": 7.17,
+      "total_pumped_mm": 179.2
+    },
+    {
+      "model": "two_layer",
+      "model_label": "Two-layer soil profile",
+      "policy": "automated",
+      "policy_label": "Automated (ML)",
+      "hours_ponded": 5.67,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 76.2,
+      "damage_proxy": 0.451,
+      "max_severity_score": 0.82,
+      "hours_pump_on": 51.83,
+      "total_pumped_mm": 187.8
+    },
+    {
+      "model": "plough_pan",
+      "model_label": "Compacted plough pan (worst case)",
+      "policy": "do_nothing",
+      "policy_label": "Do nothing",
+      "hours_ponded": 50.17,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 263.5,
+      "damage_proxy": 0.915,
+      "max_severity_score": 1.0,
+      "hours_pump_on": 0.0,
+      "total_pumped_mm": 0.0
+    },
+    {
+      "model": "plough_pan",
+      "model_label": "Compacted plough pan (worst case)",
+      "policy": "rule_based",
+      "policy_label": "Rule based",
+      "hours_ponded": 16.17,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 143.1,
+      "damage_proxy": 0.677,
+      "max_severity_score": 1.0,
+      "hours_pump_on": 15.83,
+      "total_pumped_mm": 395.8
+    },
+    {
+      "model": "plough_pan",
+      "model_label": "Compacted plough pan (worst case)",
+      "policy": "automated",
+      "policy_label": "Automated (ML)",
+      "hours_ponded": 10.33,
+      "hours_above_fc": 52.67,
+      "peak_pond_mm": 105.1,
+      "damage_proxy": 0.576,
+      "max_severity_score": 0.97,
+      "hours_pump_on": 51.83,
+      "total_pumped_mm": 413.7
+    }
+  ],
+  "figures": [
+    "D:\\Coding folder\\gsc67-arena-deabf787-gsc67\\rice-waterlogging-drainage-main\\outputs\\fig_rain_vwc.png",
+    "D:\\Coding folder\\gsc67-arena-deabf787-gsc67\\rice-waterlogging-drainage-main\\outputs\\fig_ponding_pump.png",
+    "D:\\Coding folder\\gsc67-arena-deabf787-gsc67\\rice-waterlogging-drainage-main\\outputs\\fig_severity.png",
+    "D:\\Coding folder\\gsc67-arena-deabf787-gsc67\\rice-waterlogging-drainage-main\\outputs\\fig_damage_compare.png",
+    "D:\\Coding folder\\gsc67-arena-deabf787-gsc67\\rice-waterlogging-drainage-main\\outputs\\fig_model_compare.png",
+    "D:\\Coding folder\\gsc67-arena-deabf787-gsc67\\rice-waterlogging-drainage-main\\outputs\\fig_field_damage.png"
+  ]
+}
