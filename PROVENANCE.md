@@ -1,16 +1,15 @@
 # PROVENANCE — Rice waterlogging drainage prototype
 
 ## Region & crop
-- **Place:** Polder-style farmland, Jianghuai / middle-lower Yangtze (eastern China).
-- **Timezone:** Asia/Shanghai (UTC+8).
-- **Crop:** Rice (single plot `P-RICE-A`).
+- **Place:** Farmland in Northern China (Huaihe River Plain)
+- **Timezone:** Asia /Shanghai (UTC+8).
+- **Crop:** Rice in the simulation (single plot `P-RICE-A`).
 - **Hazard:** Waterlogging from heavy rain / typhoon **rainfall hyetograph only**.  
-  No cyclone track, wind, storm surge, or salinity modules.
 
 ## Scale & hardware fiction
 - **Area:** ~10 ha equivalent (one field).
 - **Sensors:** Raspberry Pi + capacitive rainfall (`rain_cap`) + capacitive soil VWC (`soil_vwc_cap`), 10-min logging.
-- **Drainage:** ONE soil bucket + ONE ditch/sump + ONE on/off pump. No GPIO in this repo.
+- **Drainage:** one soil bucket + one drainage pump + one valve. 
 
 ## Soil / bucket parameters
 | Symbol | Value | Meaning |
@@ -24,14 +23,13 @@
 
 ### Bucket equations (see `src/hydrology.py` comments)
 1. Infiltration fills θ up to θs; remainder is surface excess.
-2. Excess accumulates as ponding / ditch stage `h` (mm).
+2. Excess accumulates as ponding stage `h` (mm).
 3. Pump removes up to `Qp × Δt` while ON; `h` never negative.
 4. Slow percolation drains θ toward FC when wet.
 
 ## Pump capacity
 - **Qp = 25 mm/h** equivalent over the plot  
   ≈ 25×10⁻³ m/h × 100_000 m² = **2_500 m³/h** for 10 ha.  
-  Chosen as a mid-size agricultural axial-flow pump class for a polder ditch — documented fiction for the prototype.
 
 ## Rule thresholds
 | Policy | ON | OFF (hysteresis) |

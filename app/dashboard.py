@@ -50,7 +50,7 @@ def save_figures(data: dict[str, pd.DataFrame] | None = None) -> list[Path]:
     fig, ax1 = plt.subplots(figsize=(10, 4))
     ax1.bar(t, feat["rain_mm_h"], width=0.12, color="steelblue", alpha=0.7, label="Rain (mm/h)")
     ax1.set_ylabel("Rain intensity (mm/h)", color="steelblue")
-    ax1.set_xlabel("Hours since start (Asia/Shanghai)")
+    ax1.set_xlabel("Hours since start")
     ax2 = ax1.twinx()
     ax2.plot(t, feat["vwc_m3m3"], color="darkgreen", lw=2, label="VWC")
     ax2.axhline(0.32, color="green", ls="--", lw=1, label="FC=0.32")
