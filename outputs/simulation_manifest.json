@@ -1,0 +1,34 @@
+{
+  "models": [
+    "bucket",
+    "two_layer",
+    "plough_pan"
+  ],
+  "policies": [
+    "do_nothing",
+    "rule_based",
+    "automated"
+  ],
+  "csv_files": [
+    "outputs\\sim_do_nothing.csv",
+    "outputs\\pump_workflow_do_nothing.csv",
+    "outputs\\sim_rule_based.csv",
+    "outputs\\pump_workflow_rule_based.csv",
+    "outputs\\sim_automated.csv",
+    "outputs\\pump_workflow_automated.csv",
+    "outputs\\sim_do_nothing__two_layer.csv",
+    "outputs\\pump_workflow_do_nothing__two_layer.csv",
+    "outputs\\sim_rule_based__two_layer.csv",
+    "outputs\\pump_workflow_rule_based__two_layer.csv",
+    "outputs\\sim_automated__two_layer.csv",
+    "outputs\\pump_workflow_automated__two_layer.csv",
+    "outputs\\sim_do_nothing__plough_pan.csv",
+    "outputs\\pump_workflow_do_nothing__plough_pan.csv",
+    "outputs\\sim_rule_based__plough_pan.csv",
+    "outputs\\pump_workflow_rule_based__plough_pan.csv",
+    "outputs\\sim_automated__plough_pan.csv",
+    "outputs\\pump_workflow_automated__plough_pan.csv"
+  ],
+  "updated": "2026-11-16T14:47:02+08:00",
+  "note": "CSVs produced by the most recent simulation run. The GUI CSV inspector lists only these by default; uncheck 'Only simulated runs' or use the Files tab to see every artefact on disk."
+}

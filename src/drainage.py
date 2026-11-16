@@ -95,16 +95,12 @@ def make_automated_policy(ctrl: PumpController | None = None) -> Callable[[dict]
         # early-action thresholds when model anticipates trouble
         if pred in ("severe",) or score >= 0.65:
             on_pond, off_pond, on_vwc = 8.0, 3.0, 0.40
-            hold = True
         elif pred in ("waterlogging",) or score >= 0.35:
             on_pond, off_pond, on_vwc = AUTO_POND_ON_MM, AUTO_POND_OFF_MM, AUTO_VWC_ON
-            hold = True
         elif pred in ("watch",) or score >= 0.15:
             on_pond, off_pond, on_vwc = 20.0, 8.0, 0.44
-            hold = rain_1h > 5.0
         else:
             on_pond, off_pond, on_vwc = POND_ON_MM, POND_OFF_MM, VWC_ON
-            hold = False
 
         rain_6h = float(ctx["row"].get("rain_6h_mm", 0.0) or 0.0)
         rain_rate = float(ctx["row"].get("rain_mm_h", 0.0) or 0.0)

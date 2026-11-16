@@ -2,121 +2,124 @@
 """One-command laptop demo for rice waterlogging drainage.
 
 Steps:
-  1. Generate raw Pi CSV if missing
+  1. Generate raw Pi CSV (fresh randomness every run unless --seed is given)
   2. Ingest + QC → sensor_clean.csv + features.csv
   3. Train severity predictor (sklearn) on physics labels
-  4. Run three pump policies (do-nothing, rule, automated)
+  4. Run the selected hydrology model(s) × pump policies
   5. Write outputs/ CSVs + matplotlib figures
-  6. Print how to open Streamlit
+  6. Print how to open the Tkinter GUI / Streamlit app
+
+Examples
+--------
+    python3 run_demo.py                          # baseline bucket model
+    python3 run_demo.py --model two_layer        # pick a hydrology model
+    python3 run_demo.py --all-models             # compare all models
+    python3 run_demo.py --seed 7 \
+        --rain-noise 0.2 --vwc-sensor-noise 0.01 # reproducible + noisier sensors
 """
 from __future__ import annotations
 
-import json
-import subprocess
+import argparse
 import sys
 from pathlib import Path
-
-import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from src.drainage import (  # noqa: E402
-    build_workflow_log,
-    make_automated_policy,
-    make_rule_policy,
-    policy_do_nothing,
-)
-from src.hydrology import run_simulation, summarize_damage  # noqa: E402
-from src.predict import train_and_predict  # noqa: E402
-
-OUT = ROOT / "outputs"
+from src import pipeline  # noqa: E402
+from src.hydrology import DEFAULT_MODEL, HYDRO_MODELS  # noqa: E402
 
 
-def _run(script: Path) -> None:
-    print(f"→ {script.relative_to(ROOT)}")
-    subprocess.check_call([sys.executable, str(script)], cwd=str(ROOT))
-
-
-def main() -> int:
-    OUT.mkdir(parents=True, exist_ok=True)
-    raw = ROOT / "data" / "raw" / "pi_sensor_log.csv"
-    if not raw.exists():
-        _run(ROOT / "scripts" / "generate_raw_csv.py")
-    else:
-        # regenerate to keep demo deterministic / fresh
-        _run(ROOT / "scripts" / "generate_raw_csv.py")
-
-    _run(ROOT / "scripts" / "ingest_qc.py")
-
-    features = pd.read_csv(ROOT / "data" / "processed" / "features.csv")
-    print(f"Features: {len(features)} rows")
-
-    # --- severity prediction ---
-    print("→ sklearn severity prediction")
-    feat_pred, metrics = train_and_predict(features)
-    feat_pred.to_csv(OUT / "features_with_prediction.csv", index=False)
-    pd.DataFrame([metrics]).to_csv(OUT / "predict_metrics.csv", index=False)
-    print("  metrics:", metrics)
-
-    # --- three policies ---
-    print("→ simulate do_nothing")
-    sim_n = run_simulation(feat_pred, policy_do_nothing)
-    sim_n.to_csv(OUT / "sim_do_nothing.csv", index=False)
-
-    print("→ simulate rule_based")
-    sim_r = run_simulation(feat_pred, make_rule_policy())
-    sim_r.to_csv(OUT / "sim_rule_based.csv", index=False)
-
-    print("→ simulate automated")
-    sim_a = run_simulation(feat_pred, make_automated_policy())
-    sim_a.to_csv(OUT / "sim_automated.csv", index=False)
-
-    # workflow logs
-    build_workflow_log(sim_r, "rule_based").to_csv(OUT / "pump_workflow_rule_based.csv", index=False)
-    wf_a = build_workflow_log(sim_a, "automated")
-    wf_a.to_csv(OUT / "pump_workflow_automated.csv", index=False)
-
-    # damage summary
-    summary = pd.DataFrame(
-        [
-            {"policy": "do_nothing", **summarize_damage(sim_n)},
-            {"policy": "rule_based", **summarize_damage(sim_r)},
-            {"policy": "automated", **summarize_damage(sim_a)},
-        ]
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Run the full rice-waterlogging drainage demo.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    summary.to_csv(OUT / "damage_summary.csv", index=False)
-    print("\n=== Damage summary ===")
-    print(summary.to_string(index=False))
+    p.add_argument(
+        "--model",
+        action="append",
+        choices=list(HYDRO_MODELS),
+        default=None,
+        help="hydrology simulation model (repeatable)",
+    )
+    p.add_argument(
+        "--all-models",
+        action="store_true",
+        help="simulate every model in src/hydrology.py",
+    )
+    p.add_argument(
+        "--policy",
+        action="append",
+        choices=list(pipeline.POLICY_ORDER),
+        default=None,
+        help="drainage policy to simulate (repeatable)",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="optional RNG seed; omit for a fresh random sensor log each run",
+    )
+    p.add_argument(
+        "--rain-noise",
+        type=float,
+        default=pipeline.DEFAULT_RAIN_NOISE,
+        help="σ of rainfall hyetograph noise while raining (mm/10min)",
+    )
+    p.add_argument(
+        "--rain-noise-dry",
+        type=float,
+        default=pipeline.DEFAULT_RAIN_NOISE_DRY,
+        help="σ of rainfall hyetograph noise in dry slots (mm/10min)",
+    )
+    p.add_argument(
+        "--rain-sensor-noise",
+        type=float,
+        default=pipeline.DEFAULT_RAIN_SENSOR_NOISE,
+        help="σ of rain sensor measurement noise (mm/10min)",
+    )
+    p.add_argument(
+        "--vwc-sensor-noise",
+        type=float,
+        default=pipeline.DEFAULT_VWC_SENSOR_NOISE,
+        help="σ of soil VWC sensor measurement noise (m3/m3)",
+    )
+    p.add_argument("--no-figures", action="store_true", help="skip matplotlib figures")
+    return p
 
-    # figures
-    print("\n→ save figures")
-    from app.dashboard import save_figures
 
-    data = {
-        "features": features,
-        "nothing": sim_n,
-        "rule": sim_r,
-        "auto": sim_a,
-        "summary": summary,
-        "workflow": wf_a,
-        "metrics": pd.DataFrame([metrics]),
-    }
-    paths = save_figures(data)
-    for p in paths:
-        print(f"  {p}")
+def _models_from_args(args: argparse.Namespace) -> tuple[str, ...]:
+    chosen: list[str] = []
+    if args.all_models:
+        chosen.extend(HYDRO_MODELS)
+    for m in args.model or []:
+        if m not in chosen:
+            chosen.append(m)
+    return tuple(chosen) if chosen else (DEFAULT_MODEL,)
 
-    # compact JSON for parent agent
-    result = {
-        "metrics": metrics,
-        "summary": summary.to_dict(orient="records"),
-        "figures": [str(p) for p in paths],
-    }
-    (OUT / "demo_result.json").write_text(json.dumps(result, indent=2))
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    cfg = pipeline.PipelineConfig(
+        seed=args.seed,
+        rain_noise=args.rain_noise,
+        rain_noise_dry=args.rain_noise_dry,
+        rain_sensor_noise=args.rain_sensor_noise,
+        vwc_sensor_noise=args.vwc_sensor_noise,
+        models=_models_from_args(args),
+        policies=tuple(args.policy) if args.policy else pipeline.POLICY_ORDER,
+        figures=not args.no_figures,
+    )
+    try:
+        pipeline.run_pipeline(cfg, log=print)
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"error: {exc}")
+        return 2
 
     print("\n=== Demo complete ===")
-    print(f"Outputs under: {OUT}")
-    print("Open Streamlit UI (optional):")
+    print("Interactive GUI (Tkinter):")
+    print(f"  cd {ROOT} && python3 app/gui.py")
+    print("Optional Streamlit UI:")
     print(f"  cd {ROOT} && .venv/bin/streamlit run app/dashboard.py")
     print("Headless figures already saved — open the PNGs in outputs/.")
     return 0

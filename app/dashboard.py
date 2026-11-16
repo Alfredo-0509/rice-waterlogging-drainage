@@ -1,12 +1,16 @@
 """Streamlit (or matplotlib-fallback) dashboard for rice waterlogging demo.
 
 Run:  streamlit run app/dashboard.py
-Or rely on run_demo.py which also saves figures under outputs/.
+Or rely on run_demo.py / the Tkinter GUI which also save figures under outputs/.
 """
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -16,32 +20,43 @@ OUT = ROOT / "outputs"
 
 
 def _load() -> dict[str, pd.DataFrame]:
-    paths = {
-        "features": ROOT / "data" / "processed" / "features.csv",
-        "nothing": OUT / "sim_do_nothing.csv",
-        "rule": OUT / "sim_rule_based.csv",
-        "auto": OUT / "sim_automated.csv",
-        "summary": OUT / "damage_summary.csv",
-        "workflow": OUT / "pump_workflow_automated.csv",
-        "metrics": OUT / "predict_metrics.csv",
-    }
-    data = {}
-    for k, p in paths.items():
-        if p.exists():
-            data[k] = pd.read_csv(p)
+    from src import pipeline
+
+    data = pipeline.load_outputs()
+    if "features" not in data and pipeline.FEATURES.exists():
+        data["features"] = pd.read_csv(pipeline.FEATURES)
     return data
 
 
-def save_figures(data: dict[str, pd.DataFrame] | None = None) -> list[Path]:
-    """Write judge-friendly matplotlib figures to outputs/."""
+def _summary_for_primary_model(summary: pd.DataFrame) -> tuple[pd.DataFrame, Optional[str]]:
+    """Summary rows for one model (charts compare policies, not models)."""
+    if "model" in summary.columns and summary["model"].notna().any():
+        primary = str(summary["model"].iloc[0])
+        sub = summary[summary["model"] == primary].copy()
+        return sub.set_index("policy"), primary
+    return summary.set_index("policy"), None
+
+
+def save_figures(data: Optional[dict[str, pd.DataFrame]] = None) -> list[Path]:
+    """Write judge-friendly matplotlib figures to outputs/.
+
+    Tolerates partial data (e.g. only the do-nothing + automated simulations)
+    and produces an extra model-comparison figure when several hydrology
+    models have been simulated.
+    """
     data = data or _load()
     OUT.mkdir(parents=True, exist_ok=True)
     saved: list[Path] = []
 
-    feat = data["features"]
-    nothing = data["nothing"]
-    auto = data["auto"]
+    feat = data.get("features")
+    nothing = data.get("nothing")
+    auto = data.get("auto")
     rule = data.get("rule")
+    summary = data.get("summary")
+
+    if feat is None or nothing is None or auto is None:
+        # not enough to draw the storm comparison yet
+        return saved
 
     # shared time axis as hours from start
     t = np.arange(len(feat)) * (10 / 60.0)
@@ -50,7 +65,7 @@ def save_figures(data: dict[str, pd.DataFrame] | None = None) -> list[Path]:
     fig, ax1 = plt.subplots(figsize=(10, 4))
     ax1.bar(t, feat["rain_mm_h"], width=0.12, color="steelblue", alpha=0.7, label="Rain (mm/h)")
     ax1.set_ylabel("Rain intensity (mm/h)", color="steelblue")
-    ax1.set_xlabel("Hours since start")
+    ax1.set_xlabel("Hours since start (Asia/Shanghai)")
     ax2 = ax1.twinx()
     ax2.plot(t, feat["vwc_m3m3"], color="darkgreen", lw=2, label="VWC")
     ax2.axhline(0.32, color="green", ls="--", lw=1, label="FC=0.32")
@@ -102,26 +117,64 @@ def save_figures(data: dict[str, pd.DataFrame] | None = None) -> list[Path]:
     plt.close(fig)
     saved.append(p)
 
-    # --- Fig 4: damage comparison bars ---
-    summary = data["summary"].set_index("policy")
-    metrics = ["hours_ponded", "peak_pond_mm", "damage_proxy"]
-    labels = ["Ponded hours", "Peak depth (mm)", "Crop-loss PROXY"]
-    fig, axes = plt.subplots(1, 3, figsize=(10, 3.8))
-    colors = {"do_nothing": "crimson", "rule_based": "darkorange", "automated": "seagreen"}
-    for ax, m, lab in zip(axes, metrics, labels):
-        vals = [float(summary.loc[pol, m]) for pol in summary.index]
-        c = [colors.get(pol, "gray") for pol in summary.index]
-        ax.bar(list(summary.index), vals, color=c)
-        ax.set_title(lab)
-        ax.tick_params(axis="x", rotation=20)
-    fig.suptitle("Damage comparison: automation reduces ponding & crop-loss PROXY")
-    fig.tight_layout()
-    p = OUT / "fig_damage_compare.png"
-    fig.savefig(p, dpi=120)
-    plt.close(fig)
-    saved.append(p)
+    # --- Fig 4: damage comparison bars (one hydrology model) ---
+    plot_summary = None
+    primary_model = None
+    if summary is not None and not summary.empty and {"policy", "damage_proxy"} <= set(summary.columns):
+        plot_summary, primary_model = _summary_for_primary_model(summary)
+        metrics = [m for m in ("hours_ponded", "peak_pond_mm", "damage_proxy") if m in plot_summary.columns]
+        labels = {
+            "hours_ponded": "Ponded hours",
+            "peak_pond_mm": "Peak depth (mm)",
+            "damage_proxy": "Crop-loss PROXY",
+        }
+        colors = {"do_nothing": "crimson", "rule_based": "darkorange", "automated": "seagreen"}
+        fig, axes = plt.subplots(1, max(1, len(metrics)), figsize=(10, 3.8), squeeze=False)
+        axes = axes.ravel()
+        for ax, m in zip(axes, metrics):
+            vals = [float(plot_summary.loc[pol, m]) for pol in plot_summary.index]
+            c = [colors.get(pol, "gray") for pol in plot_summary.index]
+            ax.bar(list(plot_summary.index), vals, color=c)
+            ax.set_title(labels[m])
+            ax.tick_params(axis="x", rotation=20)
+        for ax in axes[len(metrics):]:
+            ax.axis("off")
+        title = "Damage comparison: automation reduces ponding & crop-loss PROXY"
+        if primary_model:
+            title += f"\nmodel: {primary_model}"
+        fig.suptitle(title)
+        fig.tight_layout()
+        p = OUT / "fig_damage_compare.png"
+        fig.savefig(p, dpi=120)
+        plt.close(fig)
+        saved.append(p)
 
-    # --- Fig 5: simple field damage heatmap (filled rect by ponding) ---
+        # --- Fig 5: model comparison (only if >1 model simulated) ---
+        if "model" in summary.columns and summary["model"].nunique() > 1:
+            fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+            policies = sorted(summary["policy"].unique(), key=lambda p: ["do_nothing", "rule_based", "automated"].index(p) if p in ("do_nothing", "rule_based", "automated") else 99)
+            models = list(dict.fromkeys(summary["model"].tolist()))
+            width = 0.8 / max(1, len(policies))
+            x = np.arange(len(models))
+            palette = {"do_nothing": "crimson", "rule_based": "darkorange", "automated": "seagreen"}
+            for j, pol in enumerate(policies):
+                sub = summary[summary["policy"] == pol].set_index("model").reindex(models)
+                axes[0].bar(x + j * width, sub["hours_ponded"].fillna(0), width, label=pol, color=palette.get(pol, "gray"))
+                axes[1].bar(x + j * width, sub["damage_proxy"].fillna(0), width, label=pol, color=palette.get(pol, "gray"))
+            axes[0].set_ylabel("Ponded hours")
+            axes[0].legend(fontsize=8)
+            axes[1].set_ylabel("Crop-loss PROXY")
+            axes[1].set_xlabel("Hydrology model")
+            axes[1].set_xticks(x + width * (len(policies) - 1) / 2)
+            axes[1].set_xticklabels(models)
+            fig.suptitle("Simulation-model sensitivity (select the model in the GUI)")
+            fig.tight_layout()
+            p = OUT / "fig_model_compare.png"
+            fig.savefig(p, dpi=120)
+            plt.close(fig)
+            saved.append(p)
+
+    # --- Fig 6: simple field damage heatmap (filled rect by ponding) ---
     # Represent the single ~10 ha field as a 10x10 grid whose fill intensity
     # tracks mean ponding in late-storm window — NOT a geographic China map.
     late = nothing["pond_mm"].iloc[int(18 * 6) : int(36 * 6)]
@@ -162,7 +215,7 @@ def main_streamlit() -> None:
 
     data = _load()
     if "nothing" not in data:
-        st.warning("Outputs missing. Run `python run_demo.py` first.")
+        st.warning("Outputs missing. Run `python run_demo.py` (or the Tk GUI) first.")
         return
 
     paths = save_figures(data)
@@ -185,12 +238,10 @@ def main_streamlit() -> None:
 
 if __name__ == "__main__":
     try:
-        import streamlit  # noqa: F401
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
 
         # When executed via `streamlit run`, Streamlit injects runtime; when
         # plain python, just save figures.
-        from streamlit.runtime.scriptrunner import get_script_run_ctx
-
         if get_script_run_ctx() is not None:
             main_streamlit()
         else:

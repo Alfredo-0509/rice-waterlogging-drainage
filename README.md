@@ -4,6 +4,8 @@ Prototype for **food + water resilience**: reduce rice crop loss from extreme ra
 
 **Implemented software.** Teammates own Raspberry Pi sensors and physical drainage. This repo is a **judge-runnable laptop demo** — one command, Excel-openable CSVs, charts that show automated drainage beating do-nothing.
 
+Three ways to drive it: `run_demo.py` (CLI), `app/gui.py` (Tkinter control room — recommended for exploring), and `app/dashboard.py` (optional Streamlit view). All three call the same step functions in `src/pipeline.py`, so the CSVs are identical whichever you use.
+
 # Scripts
 ## `generate _raw_csv`
 
@@ -29,6 +31,26 @@ errror
 
 **Data automation** 
 - convert all the make-up data into a useable .csv file
+
+### Unseeded randomness + configurable noise
+
+There is **no fixed RNG seed**: every run draws fresh OS entropy, so the storm, the injected stuck sensor, the rain spike and the missing-data gap all move a little. Pass `--seed 42` only when you need a reproducible log; blank/absent means random.
+
+Rainfall variability and sensor noise are **separate, independently configurable** σ values (mm/10 min unless stated):
+
+| Flag | Python argument | Default | What it jitters |
+|------|-----------------|---------|-----------------|
+| `--rain-noise` | `rain_noise` | 0.05 | hyetograph jitter in raining slots |
+| `--rain-noise-dry` | `rain_noise_dry` | 0.01 | hyetograph jitter in dry slots |
+| `--rain-sensor-noise` | `rain_sensor_noise` | 0.02 | rain-gauge measurement noise |
+| `--vwc-sensor-noise` | `vwc_sensor_noise` | 0.002 m³/m³ | soil-VWC measurement noise |
+
+```bash
+python3 scripts/generate_raw_csv.py --rain-noise 0.2 --vwc-sensor-noise 0.01
+python3 scripts/generate_raw_csv.py --seed 7                 # repeatable storm
+```
+
+`generate(out, *, seed=None, rain_noise=..., rain_noise_dry=..., rain_sensor_noise=..., vwc_sensor_noise=...)` is the importable API; `run_demo.py` exposes the same flags and the GUI has five input boxes for them.
 
 ## `ingest_qc.py`
 
@@ -89,6 +111,31 @@ expected outcome:
 
 The final boolean output (`True` or `False`) is returned to the simulation engine (`WaterBalanceSim` from `hydrology.py`)
 
+### Selectable simulation models
+
+`src/hydrology.py` now exposes `HYDRO_MODELS`, `DEFAULT_MODEL`, `list_models()` and `get_model()`. Pass a model to `WaterBalanceSim(model=...)` or `run_simulation(..., model=...)`; the GUI dropdown, `--model` and `--all-models` are all built from that registry.
+
+**Model difference — corrected one-liners:**
+
+- **`bucket` (default)** — one 300 mm root-zone bucket, the original demo. Rain above saturation ponds immediately. Deep percolation is **8%/h of the drainable water above field capacity** (`k_perc = 0.08/h`, i.e. `k_perc·(θ−FC)·Zr·Δt`) — *not* 8% of total soil water and not 8% of the surface ponding.
+- **`two_layer` (best case of the three)** — same root zone and the same 8%/h percolation, **plus** a **160 mm permeable subsoil** store that absorbs percolation and surface excess before any ponding; that store drains to depth at **2%/h** (`subsoil_k = 0.02/h`). Ponding starts later and peaks lower (do-nothing peak 188 mm vs 231 mm).
+- **`plough_pan` (worst case of the three)** — compacted paddy **hardpan**: infiltration capped at **6 mm per 10-min slot** (≈36 mm/h) *and* root-zone percolation cut from 8%/h to **1%/h** of the water above FC (`k_perc = 0.01/h`). Ponding builds fastest/deepest (do-nothing peak 264 mm) and automated drainage still leaves the highest crop-loss PROXY (0.576 vs 0.475 / 0.451).
+
+"Best case" / "worst case" are relative to these three toy parameterisations (lower / higher surface ponding), **not** calibrated agronomic ratings.
+
+| Key | Soil profile | Behaviour |
+|-----|--------------|-----------|
+| `bucket` (default) | one 300 mm root-zone bucket; `k_perc = 0.08/h` (8%/h) | ponds as soon as the root zone saturates (original demo) |
+| `two_layer` | root zone + 160 mm permeable subsoil; `k_perc = 0.08/h`, `subsoil_k = 0.02/h` (2%/h) | excess recharges the subsoil before ponding; slow drainage afterwards |
+| `plough_pan` | compacted hardpan, infiltration capped at 6 mm/10 min; `k_perc = 0.01/h` (1%/h) | strongly reduced percolation **and** limited infiltration → fastest, deepest ponding |
+
+```bash
+python3 run_demo.py --model two_layer          # one model
+python3 run_demo.py --all-models               # all three, side by side
+```
+
+Outputs are per model: `sim_<policy>.csv` / `pump_workflow_<policy>.csv` for the default `bucket`, and `sim_<policy>__<model>.csv` / `pump_workflow_<policy>__<model>.csv` for the others. `outputs/damage_summary.csv` carries `model`, `model_label`, `policy` and `policy_label` columns so every combination can be compared.
+
 `predict.py`
 https://uc-r.github.io/gbm_regression
 ![[Pasted image 20261031174621.png|371]]
@@ -146,7 +193,10 @@ Data Visualization
 | Crop | Rice, one plot (~10 ha) |
 | Hazard | Typhoon **rainfall hyetograph** (not wind/surge) |
 | Sensors | Pi + capacitive rain + capacitive soil VWC, 10-min |
-| Drainage | 1 soil bucket + 1 ditch + 1 on/off pump |
+| Drainage | 1 ditch + 1 on/off pump; selectable soil profile (bucket / two_layer / plough_pan) |
+| RNG seed | **none** by default; `--seed` / GUI field for reproducibility only |
+| Rainfall noise | σ = 0.05 mm/10 min (raining), 0.01 (dry) — configurable |
+| Sensor noise | rain σ = 0.02 mm/10 min, VWC σ = 0.002 m³/m³ — independently configurable |
 | Pump capacity | **25 mm/h** equivalent (~2500 m³/h over 10 ha) |
 | Field capacity | **FC = 0.32** m³/m³ (clay_loam) |
 | Rule ON / OFF | pond 40→12 mm hysteresis (ponding-primary farmer rule) |
@@ -156,22 +206,44 @@ See `PROVENANCE.md` for equations and the crop-loss **PROXY** (not RMB yield).
 ## Quick start
 
 ```bash
-cd rice-waterlogging-drainage
+cd rice-waterlogging-drainage-main
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python run_demo.py
-# or: make demo
+python3 run_demo.py                    # one model (bucket), all three policies
+python3 run_demo.py --all-models       # all three hydrology models
+python3 app/gui.py                     # Tkinter control room (recommended)
+python3 app/gui.py --check             # headless sanity check, no window
+# or: make demo / make all-models / make gui
 ```
 
+Useful CLI flags: `--model {bucket,two_layer,plough_pan}` (repeatable), `--all-models`, `--policy {do_nothing,rule_based,automated}` (repeatable), `--seed`, `--rain-noise`, `--rain-noise-dry`, `--rain-sensor-noise`, `--vwc-sensor-noise`, `--no-figures`. Run `python3 run_demo.py --help` for defaults.
+
 This will:
-1. Generate `data/raw/pi_sensor_log.csv` (60 h storm)
+1. Generate `data/raw/pi_sensor_log.csv` (60 h storm, fresh randomness)
 2. QC → `data/processed/sensor_clean.csv` + `features.csv`
 3. Train a small sklearn severity model (time split + dummy baseline)
-4. Simulate **do-nothing / rule-based / automated** pump policies
-5. Write CSVs + PNG figures under `outputs/`
+4. Simulate **do-nothing / rule-based / automated** × each selected hydrology model
+5. Write CSVs + PNG figures under `outputs/` (6 figures when `--all-models`)
 
-Optional UI:
+## Tkinter GUI — control room
+
+```bash
+python3 app/gui.py
+```
+
+The left panel has **five step buttons** (① generate raw CSV with the noise/seed boxes, ② QC + features, ③ train & predict severity, ④ run simulations with the model dropdown + policy checkboxes, ⑤ summary & figures) plus **Run full pipeline**. Each step runs on a worker thread (the window stays responsive), logs its progress at the bottom and refreshes the result views when it finishes. The notebook keeps just four tabs: Overview, CSV inspector, Files, Figures.
+
+Results are **categorized and sorted**:
+
+- **Overview** — damage summary sorted by crop-loss PROXY (click any column heading to re-sort), a plain-language best-policy insight, model metrics (accuracy, MAE, dummy baseline, holdout, train/test sizes) and category counts by dimension, sorted by count. It aggregates every simulation CSV on disk; the CSV inspector is deliberately scoped to the latest run.
+- **CSV inspector** — a **dropdown**, not one tab per file. Every CSV is classified along three categories that double as filters and as the grouping/sort order: **type of data** (predictions, model metrics, damage summary, simulation, pump workflow, …), **model** (`bucket` / `two_layer` / `plough_pan`) and **treatment** = drainage policy (`do_nothing` / `rule_based` / `automated`). Choose "Group / sort by" to order the list by any of the three; each dropdown entry shows all three categories plus the filename. The selected CSV is inspected on its own: search across all columns, filter on a categorical value, sort by clicking a heading, category counts (choose the column), numeric min/max/mean/median/std of the filtered rows, and copy/open its path.
+- **Only simulated CSVs** — by default the inspector lists just the files produced by the **latest simulation run** (`outputs/simulation_manifest.json`), plus the three shared result CSVs (`features_with_prediction.csv`, `predict_metrics.csv`, `damage_summary.csv`). Raw/clean/features inputs and stale simulation CSVs left behind by earlier runs are hidden, so a single-model run shows 9 CSVs instead of 24. Uncheck "Only simulated runs" to list every CSV on disk; the **Files** tab always inventories every artefact (with kind, size, modification time and double-click-to-open).
+- **Figures** — PNG selector and inline preview.
+
+Tkinter ships with CPython; on Debian/Ubuntu install `python3-tk` if `import tkinter` fails. `python3 app/gui.py --check` verifies imports, prints the three CSV categories and their grouping previews, and exercises the categorized-stats / metrics / file-inventory / CSV-reading helpers without opening a window (it exits 1 on a machine without Tk, after printing the install hint).
+
+Optional Streamlit view:
 
 ```bash
 streamlit run app/dashboard.py
@@ -187,6 +259,7 @@ streamlit run app/dashboard.py
    - `fig_ponding_pump.png` — less ponding with automation
    - `fig_severity.png` — predicted severity
    - `fig_damage_compare.png` — ponded hours / peak depth / crop-loss PROXY
+   - `fig_model_compare.png` — crop-loss PROXY by model × policy (when more than one model ran)
    - `fig_field_damage.png` — schematic field fill (not a China map)
 
 ## Layout
@@ -199,9 +272,14 @@ data/
   meta/stations.csv
   processed/sensor_clean.csv, features.csv
 scripts/generate_raw_csv.py, ingest_qc.py
-src/hydrology.py, drainage.py, predict.py
-app/dashboard.py
-run_demo.py
+src/pipeline.py                 # shared step functions + config + GUI helpers
+src/hydrology.py                # selectable soil models
+src/drainage.py, predict.py
+app/gui.py                      # Tkinter control room (dropdown CSV inspector)
+app/dashboard.py                # figures + optional Streamlit view
+run_demo.py                     # CLI
+outputs/                        # CSVs, PNGs, demo_result.json,
+                                # simulation_manifest.json (latest run)
 PROVENANCE.md
 ```
 
@@ -219,8 +297,10 @@ PROVENANCE.md
 - Fake ADC→SI calibration (`cal_v1`) for demo sensors.
 - No live GPIO; pump actions are simulated workflow logs.
 - sklearn model is small; if classes are thin we still ship physics severity.
+- Storm/sensor noise is unseeded, so numbers differ slightly between runs; use `--seed` for identical figures.
+- The extra soil models are parameter variants of the same bucket, not calibrated field models.
 
 ## Libraries
 
-pandas, numpy, matplotlib, scikit-learn, streamlit.  
+pandas, numpy, matplotlib, scikit-learn, `tkinter` (standard library), streamlit (optional, dashboard only).  
 **No** PyTorch/TF, DRL, pyswmm, or hydrology desktop apps.

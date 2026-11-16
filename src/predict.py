@@ -6,16 +6,12 @@ Always report a dummy baseline (always 'watch').
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
 from sklearn.metrics import accuracy_score, mean_absolute_error
-from sklearn.preprocessing import LabelEncoder
 
-from src.hydrology import WaterBalanceSim, DT_H, classify_severity
+from src.hydrology import WaterBalanceSim, DT_H
 
 LABELS = ["none", "watch", "waterlogging", "severe"]
 HORIZON_SLOTS = 24  # 4 hours ahead (within 3–6 h band)
@@ -115,13 +111,6 @@ def train_and_predict(features: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     X_tr, X_te = X.iloc[:split], X.iloc[split:]
     y_tr, y_te = y_lab.iloc[:split], y_lab.iloc[split:]
     ys_tr, ys_te = y_score.iloc[:split], y_score.iloc[split:]
-
-    le = LabelEncoder()
-    le.fit(LABELS)
-    # ensure all classes seen: map unknowns
-    y_tr_enc = le.transform(y_tr.clip())  # type: ignore
-    # safer:
-    y_tr_enc = np.array([le.transform([lab])[0] if lab in le.classes_ else 0 for lab in y_tr])
 
     clf = GradientBoostingClassifier(random_state=0, max_depth=3, n_estimators=80)
     # If training set missing a class, sklearn still works with present classes

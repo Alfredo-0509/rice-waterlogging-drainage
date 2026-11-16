@@ -34,10 +34,28 @@ Formulas (explicit Euler, Δt = 10 min = 1/6 h):
 
 Severity labels from rolling hydrologic state:
   none | watch | waterlogging | severe   + score 0–1 + reasons.
+
+Simulation models (selectable)
+------------------------------
+The water balance can be run with different soil-profile assumptions. Every
+model shares the same pump, ponding, severity and damage-PROXY machinery; only
+the infiltration / storage / percolation physics differ:
+
+  bucket      single root-zone bucket — ponds as soon as the root zone is
+              saturated (baseline, used by the original demo).
+  two_layer   root zone + 160 mm permeable subsoil — excess water recharges the
+              subsoil before ponding, so ponding starts later; the subsoil then
+              drains slowly to depth.
+  plough_pan  compacted paddy pan — infiltration capped at 6 mm/slot and deep
+              percolation strongly reduced; ponding builds fastest (worst case).
+
+Select with ``WaterBalanceSim(model="two_layer")`` or
+``run_simulation(features, policy, model="plough_pan")``. Use ``list_models()``
+to enumerate them (the GUI builds its dropdown from that).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 import numpy as np
@@ -50,9 +68,103 @@ FC = 0.32
 THETA_S = 0.52
 THETA_R = 0.15
 PUMP_MM_H = 25.0  # mm/h equivalent over plot
-K_PERC = 0.08  # fraction of (θ-FC)*Zr drained per hour when wet
+# Rate factor on DRAINABLE water above field capacity:
+#   D_perc = k_perc * (θ - FC) * Zr * Δt
+# 8%/h therefore means 8% of the (θ-FC)*Zr store per hour — NOT 8% of total
+# soil water and NOT 8% of the surface ponding.
+K_PERC = 0.08
 DT_H = 10.0 / 60.0
 POND_HARM_MM = 20.0  # depth above which ponding harms rice canopy/roots
+
+
+@dataclass(frozen=True)
+class HydroModel:
+    """Parameters + metadata for one selectable water-balance model."""
+
+    key: str
+    label: str
+    description: str
+    fc: float = FC
+    theta_s: float = THETA_S
+    theta_r: float = THETA_R
+    zr_mm: float = ZR_MM
+    pump_mm_h: float = PUMP_MM_H
+    k_perc: float = K_PERC
+    infil_cap_mm: Optional[float] = None  # max infiltration per 10-min slot
+    subsoil_mm: float = 0.0  # permeable subsoil store below the root zone
+    subsoil_k: float = 0.0  # fraction of subsoil store drained to depth per hour
+    weir_mm: float = 200.0  # ditch overflow stage (prototype stability)
+
+    def summary(self) -> str:
+        bits = [f"FC={self.fc:.2f}", f"θs={self.theta_s:.2f}", f"Zr={self.zr_mm:.0f}mm"]
+        if self.infil_cap_mm is not None:
+            bits.append(f"infil cap={self.infil_cap_mm:.1f}mm/10min")
+        if self.subsoil_mm:
+            bits.append(
+                f"subsoil={self.subsoil_mm:.0f}mm "
+                f"(drains {self.subsoil_k * 100:.0f}%/h)"
+            )
+        bits.append(
+            f"percolation={self.k_perc * 100:.0f}%/h of (θ−FC)·Zr"
+        )
+        return ", ".join(bits)
+
+
+HYDRO_MODELS: dict[str, HydroModel] = {
+    "bucket": HydroModel(
+        key="bucket",
+        label="Single bucket (baseline)",
+        description=(
+            "One root-zone bucket (Zr = 300 mm). Rain fills the root zone up to "
+            "saturation; anything above that ponds immediately on the field. "
+            "Drainable water above field capacity percolates at 8%/h. "
+            "This is the original demo model."
+        ),
+    ),
+    "two_layer": HydroModel(
+        key="two_layer",
+        label="Two-layer soil profile",
+        description=(
+            "Root zone + 160 mm permeable subsoil, with the same 8%/h root-zone "
+            "percolation as bucket. Water that the root zone cannot hold — "
+            "including percolation and surface excess — recharges the subsoil "
+            "first, so ponding starts later and peaks lower. The subsoil then "
+            "drains slowly (2%/h of its stored water) to depth."
+        ),
+        subsoil_mm=160.0,
+        subsoil_k=0.02,
+    ),
+    "plough_pan": HydroModel(
+        key="plough_pan",
+        label="Compacted plough pan (worst case)",
+        description=(
+            "A compacted paddy hardpan limits infiltration to 6 mm per 10-min slot "
+            "(≈36 mm/h) and cuts root-zone percolation from 8%/h to 1%/h of the "
+            "water above field capacity. Ponding builds fastest — useful as a "
+            "'bad year' / conservative drainage-design scenario."
+        ),
+        infil_cap_mm=6.0,
+        k_perc=0.01,
+    ),
+}
+
+DEFAULT_MODEL = "bucket"
+
+
+def list_models() -> list[HydroModel]:
+    """All selectable simulation models, in stable display order."""
+    return list(HYDRO_MODELS.values())
+
+
+def get_model(key: str | HydroModel) -> HydroModel:
+    if isinstance(key, HydroModel):
+        return key
+    try:
+        return HYDRO_MODELS[str(key)]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown hydrology model {key!r}; choose one of: {', '.join(HYDRO_MODELS)}"
+        ) from exc
 
 
 @dataclass
@@ -64,6 +176,7 @@ class HydroState:
     hours_above_fc: float = 0.0
     peak_pond_mm: float = 0.0
     pumped_mm_cum: float = 0.0
+    subsoil_mm: float = 0.0
 
 
 @dataclass
@@ -77,6 +190,8 @@ class StepResult:
     severity_label: str
     severity_score: float
     reasons: str
+    subsoil_mm: float = 0.0
+
 
 
 def _piecewise_hours(h: float, knots: list[tuple[float, float]]) -> float:
@@ -175,20 +290,29 @@ def classify_severity(
 
 
 class WaterBalanceSim:
-    """One-field soil bucket + ditch + pump simulator."""
+    """One-field soil bucket + ditch + pump simulator.
+
+    ``model`` selects the soil-profile physics (see ``HYDRO_MODELS``). Explicit
+    numeric overrides (``pump_mm_h``, ``fc``, ``theta_s``, ``zr_mm``) still win
+    over the model defaults so existing call sites keep working unchanged.
+    """
 
     def __init__(
         self,
-        pump_mm_h: float = PUMP_MM_H,
-        fc: float = FC,
-        theta_s: float = THETA_S,
-        zr_mm: float = ZR_MM,
+        pump_mm_h: Optional[float] = None,
+        fc: Optional[float] = None,
+        theta_s: Optional[float] = None,
+        zr_mm: Optional[float] = None,
         initial_theta: float = 0.22,
+        model: str | HydroModel = DEFAULT_MODEL,
     ):
-        self.pump_mm_h = pump_mm_h
-        self.fc = fc
-        self.theta_s = theta_s
-        self.zr_mm = zr_mm
+        spec = get_model(model)
+        self.model = spec
+        self.model_key = spec.key
+        self.pump_mm_h = spec.pump_mm_h if pump_mm_h is None else pump_mm_h
+        self.fc = spec.fc if fc is None else fc
+        self.theta_s = spec.theta_s if theta_s is None else theta_s
+        self.zr_mm = spec.zr_mm if zr_mm is None else zr_mm
         self.state = HydroState(theta=initial_theta)
 
     def reset(self, theta: float = 0.22, pond_mm: float = 0.0) -> None:
@@ -202,18 +326,34 @@ class WaterBalanceSim:
         recent_pond_hours: float = 0.0,
     ) -> StepResult:
         st = self.state
+        spec = self.model
         rain_mm = max(0.0, float(rain_mm))
 
-        # infiltration capacity this slot
+        # infiltration capacity this slot (optionally capped by the soil surface)
         room = max(0.0, (self.theta_s - st.theta) * self.zr_mm)
         infil = min(rain_mm, room)
+        if spec.infil_cap_mm is not None:
+            infil = min(infil, spec.infil_cap_mm)
         excess = rain_mm - infil
 
         # percolation when above FC
-        perc = K_PERC * max(st.theta - self.fc, 0.0) * self.zr_mm * DT_H
+        perc = spec.k_perc * max(st.theta - self.fc, 0.0) * self.zr_mm * DT_H
 
         theta = st.theta + (infil - perc) / self.zr_mm
-        theta = float(np.clip(theta, THETA_R, self.theta_s))
+        theta = float(np.clip(theta, spec.theta_r, self.theta_s))
+
+        # optional permeable subsoil store (two_layer model)
+        subsoil = st.subsoil_mm
+        if spec.subsoil_mm > 0:
+            # percolation first, then whatever surface excess still fits
+            sub_room = max(0.0, spec.subsoil_mm - subsoil)
+            perc_to_sub = min(perc, sub_room)
+            excess_to_sub = min(excess, max(0.0, sub_room - perc_to_sub))
+            subsoil += perc_to_sub + excess_to_sub
+            excess -= excess_to_sub
+            # slow deep drainage out of the subsoil
+            subsoil -= min(subsoil, spec.subsoil_k * subsoil * DT_H)
+        subsoil = max(0.0, subsoil)
 
         # ditch / ponding
         pond = st.pond_mm + excess
@@ -223,8 +363,8 @@ class WaterBalanceSim:
             pond -= pumped
 
         # tiny weir leak when very deep (overflow to canal) — keeps prototype stable
-        if pond > 200:
-            weir = min(pond - 200, 5.0)
+        if pond > spec.weir_mm:
+            weir = min(pond - spec.weir_mm, 5.0)
             pond -= weir
 
         pond = max(0.0, pond)
@@ -241,6 +381,7 @@ class WaterBalanceSim:
             hours_above_fc=hours_fc,
             peak_pond_mm=peak,
             pumped_mm_cum=st.pumped_mm_cum + pumped,
+            subsoil_mm=subsoil,
         )
 
         label, score, reasons = classify_severity(
@@ -256,16 +397,18 @@ class WaterBalanceSim:
             severity_label=label,
             severity_score=score,
             reasons=reasons,
+            subsoil_mm=subsoil,
         )
 
 
 def run_simulation(
     features: pd.DataFrame,
     policy_fn: Callable[[dict], bool],
-    pump_mm_h: float = PUMP_MM_H,
+    pump_mm_h: Optional[float] = None,
     initial_theta: Optional[float] = None,
+    model: str | HydroModel = DEFAULT_MODEL,
 ) -> pd.DataFrame:
-    """Run water-balance with a pump policy.
+    """Run water-balance with a pump policy and a selectable hydrology model.
 
     policy_fn(ctx) -> pump_on bool
     ctx keys: i, row, state, history (list of StepResult-like dicts), predicted_severity
@@ -273,7 +416,9 @@ def run_simulation(
     feat = features.copy()
     if initial_theta is None:
         initial_theta = float(feat["vwc_m3m3"].iloc[0])
-    sim = WaterBalanceSim(pump_mm_h=pump_mm_h, initial_theta=initial_theta)
+    sim = WaterBalanceSim(
+        pump_mm_h=pump_mm_h, initial_theta=initial_theta, model=model
+    )
 
     history: list[dict] = []
     rows = []
@@ -316,8 +461,10 @@ def run_simulation(
             "hours_ponded_cum": sim.state.hours_ponded,
             "hours_above_fc_cum": sim.state.hours_above_fc,
             "peak_pond_mm": sim.state.peak_pond_mm,
+            "subsoil_mm": res.subsoil_mm,
             "predicted_severity": ctx["predicted_severity"],
             "predicted_score": ctx["predicted_score"],
+            "model": sim.model_key,
         }
         history.append(rec)
         rows.append(rec)
@@ -340,7 +487,7 @@ def run_simulation(
 
 def summarize_damage(sim_df: pd.DataFrame) -> dict:
     last = sim_df.iloc[-1]
-    return {
+    out = {
         "hours_ponded": round(float(last["hours_ponded_cum"]), 2),
         "hours_above_fc": round(float(last["hours_above_fc_cum"]), 2),
         "peak_pond_mm": round(float(last["peak_pond_mm"]), 1),
@@ -349,3 +496,6 @@ def summarize_damage(sim_df: pd.DataFrame) -> dict:
         "hours_pump_on": round(float(sim_df["pump_on"].sum() * DT_H), 2),
         "total_pumped_mm": round(float(sim_df["pumped_mm"].sum()), 1),
     }
+    if "model" in sim_df.columns and len(sim_df):
+        out["model"] = str(sim_df["model"].iloc[-1])
+    return out

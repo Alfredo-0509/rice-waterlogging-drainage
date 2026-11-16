@@ -5,11 +5,12 @@ QC rules:
   - range checks (rain 0–25 mm/10min; VWC 0.05–0.55)
   - stuck: identical non-missing value ≥ 6 consecutive slots
   - spikes: |Δ| larger than physical max for one slot
-  - missing timestamps: reindex to regular 10-min grid; leave 
+  - missing timestamps: reindex to regular 10-min grid; leave
    (never sentinels)
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -75,8 +76,14 @@ def qc_series(values: pd.Series, kind: str) -> tuple[pd.Series, pd.Series]:
     return out, flags
 
 
-def main() -> None:
-    raw = pd.read_csv(RAW)
+def run_ingest(
+    raw_path: Path = RAW,
+    clean_path: Path = CLEAN,
+    features_path: Path = FEATURES,
+    verbose: bool = True,
+) -> tuple[Path, Path]:
+    """QC the raw log and write sensor_clean.csv + features.csv."""
+    raw = pd.read_csv(raw_path)
     raw["timestamp_local"] = _parse_ts(raw["timestamp_local"])
     # empty strings → NA
     for col in ("raw_adc", "value_si"):
@@ -95,12 +102,25 @@ def main() -> None:
     rain_val, rain_flag = qc_series(rain["value_si"], "rain")
     vwc_val, vwc_flag = qc_series(vwc["value_si"], "vwc")
 
+    def to_utc_str(ts_index):
+        if getattr(ts_index, "tz", None) is None:
+            ts_index = ts_index.tz_localize("Asia/Shanghai")
+        return ts_index.tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    utc_strs = to_utc_str(full_idx)
+    local_strs = []
+    for t in full_idx:
+        if getattr(t, "tzinfo", None) is None:
+            t = t.tz_localize("Asia/Shanghai")
+        else:
+            t = t.tz_convert("Asia/Shanghai")
+        local_strs.append(t.isoformat())
+
     # rebuild long clean
     rain_clean = pd.DataFrame(
         {
-            "timestamp_local": full_idx,
-            "timestamp_utc": full_idx.tz_convert("UTC") if full_idx.tz is not None
-            else (full_idx.tz_localize("Asia/Shanghai").tz_convert("UTC")),
+            "timestamp_local": local_strs,
+            "timestamp_utc": utc_strs,
             "farm_id": "JH-AH-01",
             "plot_id": "P-RICE-A",
             "device_id": "RPi-01",
@@ -113,13 +133,10 @@ def main() -> None:
             "quality_flag": rain_flag.values,
         }
     )
-    # fix utc if naive
-    if rain_clean["timestamp_utc"].dtype == object or str(rain_clean["timestamp_utc"].dtype).startswith("datetime"):
-        pass
     vwc_clean = pd.DataFrame(
         {
-            "timestamp_local": full_idx,
-            "timestamp_utc": rain_clean["timestamp_utc"],
+            "timestamp_local": local_strs,
+            "timestamp_utc": utc_strs,
             "farm_id": "JH-AH-01",
             "plot_id": "P-RICE-A",
             "device_id": "RPi-01",
@@ -133,30 +150,11 @@ def main() -> None:
         }
     )
 
-    # ensure UTC column is ISO Z strings for Excel friendliness
-    def to_utc_str(ts_index):
-        if getattr(ts_index, "tz", None) is None:
-            ts_index = ts_index.tz_localize("Asia/Shanghai")
-        return ts_index.tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    rain_clean["timestamp_utc"] = to_utc_str(full_idx)
-    vwc_clean["timestamp_utc"] = to_utc_str(full_idx)
-    rain_clean["timestamp_local"] = full_idx.strftime("%Y-%m-%dT%H:%M:%S+08:00") if full_idx.tz is None else full_idx.tz_convert("Asia/Shanghai").strftime("%Y-%m-%dT%H:%M:%S%z").str.replace(r"(\d{2})(\d{2})$", r"\1:\2", regex=True)
-    # simpler local format
-    local_strs = []
-    for t in full_idx:
-        if getattr(t, "tzinfo", None) is None:
-            t = t.tz_localize("Asia/Shanghai")
-        else:
-            t = t.tz_convert("Asia/Shanghai")
-        local_strs.append(t.isoformat())
-    rain_clean["timestamp_local"] = local_strs
-    vwc_clean["timestamp_local"] = local_strs
-
     clean = pd.concat([rain_clean, vwc_clean], ignore_index=True)
     clean = clean.sort_values(["timestamp_local", "sensor_type"]).reset_index(drop=True)
-    CLEAN.parent.mkdir(parents=True, exist_ok=True)
-    clean.to_csv(CLEAN, index=False)
+    clean_path = Path(clean_path)
+    clean_path.parent.mkdir(parents=True, exist_ok=True)
+    clean.to_csv(clean_path, index=False)
 
     # --- features (wide) ---
     # fill remaining rain/vwc gaps lightly for feature engineering
@@ -173,7 +171,11 @@ def main() -> None:
     for i in range(len(full_idx)):
         rf, vf = rain_flag.iloc[i], vwc_flag.iloc[i]
         if rf == "missing" or vf == "missing":
-            qsum.append("gap_filled" if not (pd.isna(rain_f.iloc[i]) or pd.isna(vwc_f.iloc[i])) else "missing")
+            qsum.append(
+                "gap_filled"
+                if not (pd.isna(rain_f.iloc[i]) or pd.isna(vwc_f.iloc[i]))
+                else "missing"
+            )
         elif rf == "suspect" or vf == "suspect":
             qsum.append("spike_flagged")
         elif vf == "stuck":
@@ -196,12 +198,27 @@ def main() -> None:
             "rain_mm_10min": rain_f.values.round(3),
         }
     )
-    feat.to_csv(FEATURES, index=False)
-    print(f"Wrote {CLEAN} ({len(clean)} rows)")
-    print(f"Wrote {FEATURES} ({len(feat)} rows)")
-    print("QC flag counts (rain):", rain_flag.value_counts().to_dict())
-    print("QC flag counts (vwc):", vwc_flag.value_counts().to_dict())
+    features_path = Path(features_path)
+    features_path.parent.mkdir(parents=True, exist_ok=True)
+    feat.to_csv(features_path, index=False)
+
+    if verbose:
+        print(f"Wrote {clean_path} ({len(clean)} rows)")
+        print(f"Wrote {features_path} ({len(feat)} rows)")
+        print("QC flag counts (rain):", rain_flag.value_counts().to_dict())
+        print("QC flag counts (vwc):", vwc_flag.value_counts().to_dict())
+    return clean_path, features_path
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="QC raw Pi log → clean sensor + features CSVs.")
+    parser.add_argument("--raw", type=Path, default=RAW, help="input raw log")
+    parser.add_argument("--clean", type=Path, default=CLEAN, help="output clean long CSV")
+    parser.add_argument("--features", type=Path, default=FEATURES, help="output wide features CSV")
+    args = parser.parse_args(argv)
+    run_ingest(args.raw, args.clean, args.features)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

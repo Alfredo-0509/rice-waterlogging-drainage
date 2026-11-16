@@ -1,5 +1,13 @@
+# Local virtualenv (recreate with: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)
 .venv/
+venv/
+
+# Python caches / compiled files
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
-.streamlit/
+.mypy_cache/
+
+# Editor / OS cruft
+.DS_Store
+*.swp
